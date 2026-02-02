@@ -1,0 +1,26 @@
+# Pipecat Cloud deployment configuration
+# See: https://docs.pipecat.ai/deployment/pipecat-cloud/
+
+agent_name = "askjg-demo-gemini-pcc"
+
+# Docker image on GitHub Container Registry
+# Build with: pipecat cloud docker build-push
+image = "ghcr.io/your-org/askjg-demo-gemini-pcc:latest"
+
+# Credentials for pulling from private ghcr.io registry
+image_credentials = "your-ghcr-credentials"
+
+# Secret set containing Google Vertex credentials
+# Create with: pipecat cloud secrets set your-google-credentials ...
+secret_set = "your-google-credentials"
+
+# Agent compute profile
+agent_profile = "agent-1x"
+
+# Deployment region
+region = "us-west"
+
+[scaling]
+    # Keep 1 warm instance for fast response
+    min_agents = 1
+    max_agents = 4

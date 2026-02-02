@@ -1,0 +1,24 @@
+# Local context
+_docs/
+_refs/
+.claude/
+
+# Git
+.git/
+.gitignore
+
+# Environment files and secrets
+.env*
+credentials.json
+
+# Documentation
+*.md
+docs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# OS
+.DS_Store
