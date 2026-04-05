@@ -3,7 +3,7 @@
 #
 # This module provides an alternative voice agent implementation that uses:
 # - Google ADK (Agent Development Kit) for agent orchestration
-# - PyTorch-based Silero VAD (instead of ONNX Runtime)
+# - Silero VAD via ONNX Runtime (reuses existing vad/silero_vad.py model)
 # - LiveKit Data Channel for broadcasting UI state to frontends
 # - Gemini Live API for real-time audio conversation
 #
@@ -29,7 +29,6 @@ import os
 from typing import Optional
 
 import numpy as np
-import torch
 from google import genai
 from google.genai import types
 from livekit import api, rtc
@@ -39,6 +38,9 @@ from google.adk.agents import Agent
 from google.adk.callbacks import BaseCallback
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+
+# Reuse the existing ONNX-based Silero VAD model wrapper
+from custom_voice_agent.vad.silero_vad import _SileroModel, SileroVAD
 
 logger = logging.getLogger(__name__)
 
@@ -104,28 +106,30 @@ class VADInterruptionCallback(BaseCallback):
 
 
 # ==============================================================================
-# CLIENT-SIDE VAD (SILERO via PyTorch)
+# CLIENT-SIDE VAD (SILERO via ONNX Runtime)
 # ==============================================================================
 class SileroVADAnalyzer:
-    """Voice Activity Detection using Silero VAD via PyTorch.
+    """Voice Activity Detection using Silero VAD via ONNX Runtime.
 
-    This is a PyTorch-based alternative to the ONNX-based SileroVAD in
-    vad/silero_vad.py. It uses the same confidence/timing parameters
-    for identical barge-in behavior.
+    Reuses the existing ONNX-based ``_SileroModel`` from
+    ``vad/silero_vad.py`` so there is **no PyTorch dependency**.
+    Uses the same confidence/timing parameters for identical barge-in
+    behavior as the main pipeline's ``SileroVAD``.
 
-    Uses the same 4-state logic as the existing VAD but in a simplified
-    single-method interface suitable for the ADK integration pattern.
+    The simplified single-method ``process_chunk`` interface is designed
+    for the ADK integration pattern where the caller only needs a
+    boolean "is user speaking?" answer plus automatic callback firing
+    on speech-start transitions.
     """
 
     def __init__(self, callback: VADInterruptionCallback):
-        logger.info("Loading Silero VAD model (PyTorch)...")
+        logger.info("Loading Silero VAD model (ONNX Runtime)...")
         self.callback = callback
-        self.model, _ = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad',
-            model='silero_vad',
-            force_reload=False,
-            onnx=False
-        )
+
+        # Reuse the ONNX model path resolution from the existing VAD module
+        model_path = SileroVAD._get_default_model_path()
+        self.model = _SileroModel(model_path)
+
         self.is_speaking = False
         self.speaking_frames = 0
         self.silent_frames = 0
@@ -153,8 +157,7 @@ class SileroVADAnalyzer:
             confidence = 0.0
         else:
             audio_float32 = audio_int16.astype(np.float32) / 32768.0
-            tensor = torch.from_numpy(audio_float32)
-            confidence = self.model(tensor, RATE_16K).item()
+            confidence = self.model(audio_float32, RATE_16K)
 
         was_speaking = self.is_speaking
 
@@ -231,7 +234,7 @@ class ADKLiveKitAgent:
         self.vad: Optional[SileroVADAnalyzer] = None
 
     def _init_vad(self):
-        """Initialize VAD lazily so torch.hub.load runs after event loop starts."""
+        """Initialize VAD lazily so ONNX model loads after event loop starts."""
         if self.vad is None:
             self.vad = SileroVADAnalyzer(self.interruption_callback)
 

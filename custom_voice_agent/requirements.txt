@@ -29,6 +29,3 @@ google-auth>=2.0.0
 
 # Google ADK (Agent Development Kit) for agent orchestration
 google-adk>=0.1.0
-
-# PyTorch — used by ADK integration's Silero VAD (alternative to ONNX)
-torch>=2.0.0
