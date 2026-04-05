@@ -1,0 +1,24 @@
+# Custom Voice Agent — Dependencies (No Pipecat!)
+#
+# These are the only runtime dependencies needed:
+
+# Gemini Live API (WebSocket streaming)
+google-genai>=1.0.0
+
+# LiveKit Python SDK (WebRTC transport)
+livekit>=0.18.0
+
+# LiveKit API (token generation) — optional if providing pre-generated tokens
+livekit-api>=0.7.0
+
+# Silero VAD ONNX model inference
+onnxruntime>=1.16.0
+
+# Audio processing
+numpy>=1.24.0
+
+# Optional: .env file loading
+python-dotenv
+
+# Optional: Google auth for Vertex AI
+google-auth>=2.0.0
