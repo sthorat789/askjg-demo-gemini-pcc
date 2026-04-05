@@ -1,8 +1,7 @@
 #
-# ADK LiveKit UI Integration — Alternative backend using Google ADK.
+# LiveKit UI Integration — Voice agent with Gemini Live and LiveKit.
 #
 # This module provides an alternative voice agent implementation that uses:
-# - Google ADK (Agent Development Kit) for agent orchestration
 # - Silero VAD via ONNX Runtime (reuses existing vad/silero_vad.py model)
 # - LiveKit Data Channel for broadcasting UI state to frontends
 # - Gemini Live API for real-time audio conversation
@@ -16,7 +15,7 @@
 #   python -m custom_voice_agent.livekit_ui_integration
 #
 # Required environment variables:
-#   GEMINI_API_KEY     — Google AI API key for Gemini
+#   GOOGLE_API_KEY     — Google AI API key for Gemini (or GEMINI_API_KEY)
 #   LIVEKIT_URL        — LiveKit server URL
 #   LIVEKIT_API_KEY    — LiveKit API key
 #   LIVEKIT_API_SECRET — LiveKit API secret
@@ -32,12 +31,6 @@ import numpy as np
 from google import genai
 from google.genai import types
 from livekit import api, rtc
-
-# Google ADK Imports
-from google.adk.agents import Agent
-from google.adk.callbacks import BaseCallback
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
 
 # Reuse the existing ONNX-based Silero VAD model wrapper
 from custom_voice_agent.vad.silero_vad import _SileroModel, SileroVAD
@@ -59,16 +52,16 @@ VAD_MIN_VOLUME = 0.6
 
 
 # ==============================================================================
-# ADK CALLBACK LOGIC (Interruption Handling & UI Sync)
+# CALLBACK LOGIC (Interruption Handling & UI Sync)
 # ==============================================================================
-class VADInterruptionCallback(BaseCallback):
-    """ADK callback for handling VAD interruptions and broadcasting UI state.
+class VADInterruptionCallback:
+    """Callback for handling VAD interruptions and broadcasting UI state.
 
-    Coordinates between client-side VAD events and the ADK agent lifecycle,
+    Coordinates between client-side VAD events and the agent lifecycle,
     broadcasting state changes to connected frontends via LiveKit data channel.
     """
 
-    def __init__(self, agent_reference: "ADKLiveKitAgent"):
+    def __init__(self, agent_reference: "LiveKitAgent"):
         self.flush_playback_queue = False
         self.barge_in_active = False
         self.agent_ref = agent_reference
@@ -117,7 +110,7 @@ class SileroVADAnalyzer:
     behavior as the main pipeline's ``SileroVAD``.
 
     The simplified single-method ``process_chunk`` interface is designed
-    for the ADK integration pattern where the caller only needs a
+    for the integration pattern where the caller only needs a
     boolean "is user speaking?" answer plus automatic callback firing
     on speech-start transitions.
     """
@@ -148,7 +141,8 @@ class SileroVADAnalyzer:
             True if the user is currently speaking, False otherwise.
         """
         audio_int16 = np.frombuffer(audio_chunk, dtype=np.int16)
-        volume = np.max(np.abs(audio_int16)) / 32768.0
+        audio_float32 = audio_int16.astype(np.float32) / 32768.0
+        volume = float(np.sqrt(np.mean(np.square(audio_float32))))
 
         # Skip inference for very quiet frames (below 10% of the minimum
         # volume threshold) to save CPU.  At this level the signal is
@@ -156,12 +150,14 @@ class SileroVADAnalyzer:
         if volume < VAD_MIN_VOLUME * 0.1:
             confidence = 0.0
         else:
-            audio_float32 = audio_int16.astype(np.float32) / 32768.0
             confidence = self.model(audio_float32, RATE_16K)
 
         was_speaking = self.is_speaking
+        is_speech_frame = (
+            confidence >= VAD_CONFIDENCE_THRESHOLD and volume >= VAD_MIN_VOLUME
+        )
 
-        if confidence >= VAD_CONFIDENCE_THRESHOLD:
+        if is_speech_frame:
             self.speaking_frames += 1
             self.silent_frames = 0
             if self.speaking_frames >= self.start_frames_threshold:
@@ -172,7 +168,7 @@ class SileroVADAnalyzer:
             if self.silent_frames >= self.stop_frames_threshold:
                 self.is_speaking = False
 
-        # Fire ADK Event when speech-start transition occurs
+        # Fire callback when speech-start transition occurs
         if self.is_speaking and not was_speaking:
             self.callback.on_user_speech_started()
 
@@ -180,10 +176,10 @@ class SileroVADAnalyzer:
 
 
 # ==============================================================================
-# LIVEKIT & ADK AGENT ARCHITECTURE
+# LIVEKIT AGENT ARCHITECTURE
 # ==============================================================================
-class ADKLiveKitAgent:
-    """Voice agent combining Google ADK, Gemini Live, LiveKit, and Silero VAD.
+class LiveKitAgent:
+    """Voice agent combining Gemini Live, LiveKit, and Silero VAD.
 
     This agent:
     1. Joins a LiveKit room and publishes an audio track for bot output
@@ -199,38 +195,37 @@ class ADKLiveKitAgent:
                       Data Channel ← UI State Broadcasts
     """
 
-    def __init__(self, room_name: str = "gemini-adk-room"):
+    INPUT_QUEUE_MAXSIZE = 100
+    OUTPUT_QUEUE_MAXSIZE = 100
+
+    def __init__(self, room_name: str = "gemini-room"):
         self.room_name = room_name
         self.room = rtc.Room()
         self.audio_source = rtc.AudioSource(24000, 1)
-        self.input_queue: asyncio.Queue[bytes] = asyncio.Queue()
-        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue()
+        self.input_queue: asyncio.Queue[bytes] = asyncio.Queue(
+            maxsize=self.INPUT_QUEUE_MAXSIZE
+        )
+        self.output_queue: asyncio.Queue[bytes] = asyncio.Queue(
+            maxsize=self.OUTPUT_QUEUE_MAXSIZE
+        )
         self.is_running = False
 
-        # ADK Architecture Initialization
-        self.adk_agent = Agent(
-            name="conversational_ai",
-            model="gemini-2.0-flash-exp",
-            description="A highly responsive AI using dual VAD and fast barge-in.",
-            instruction=(
-                "You are a helpful, conversational AI assistant connected via LiveKit. "
-                "You can be interrupted naturally mid-sentence and handle it gracefully. "
-                "You know when to stay quiet (like when someone is talking to another "
-                "person nearby). Filter out background noise and focus on the person "
-                "speaking to you."
-            )
+        self.model_name = "gemini-2.0-flash-exp"
+        self.system_instruction = (
+            "You are a helpful, conversational AI assistant connected via LiveKit. "
+            "You can be interrupted naturally mid-sentence and handle it gracefully. "
+            "You know when to stay quiet (like when someone is talking to another "
+            "person nearby). Filter out background noise and focus on the person "
+            "speaking to you."
         )
-        self.session_service = InMemorySessionService()
+
         self.interruption_callback = VADInterruptionCallback(agent_reference=self)
 
-        self.runner = Runner(
-            agent=self.adk_agent,
-            app_name="adk_live_voice",
-            session_service=self.session_service,
-            callbacks=[self.interruption_callback]
-        )
+        google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if not google_api_key:
+            raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY is required")
 
-        self.client = genai.Client()
+        self.client = genai.Client(api_key=google_api_key)
         self.vad: Optional[SileroVADAnalyzer] = None
 
     def _init_vad(self):
@@ -253,8 +248,8 @@ class ADKLiveKitAgent:
             raise ValueError("LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required")
 
         token = api.AccessToken(lk_api_key, lk_api_secret) \
-            .with_identity("adk-agent") \
-            .with_name("ADK Gemini Live") \
+            .with_identity("voice-agent") \
+            .with_name("Gemini Live Agent") \
             .with_grants(api.VideoGrants(room_join=True, room=self.room_name))
         return token.to_jwt()
 
@@ -393,7 +388,7 @@ class ADKLiveKitAgent:
                             self.output_queue.put_nowait(part.inline_data.data)
 
     async def start(self):
-        """Start the ADK agent: connect to LiveKit, initialize VAD, and run."""
+        """Start the agent: connect to LiveKit, initialize VAD, and run."""
         self.is_running = True
         self._init_vad()
 
@@ -407,7 +402,7 @@ class ADKLiveKitAgent:
         await self.room.connect(livekit_url, token)
 
         track = rtc.LocalAudioTrack.create_audio_track(
-            "adk-agent-mic", self.audio_source
+            "agent-mic", self.audio_source
         )
         await self.room.local_participant.publish_track(track)
 
@@ -423,19 +418,15 @@ class ADKLiveKitAgent:
         config = types.LiveConnectConfig(
             response_modalities=[types.LiveModality.AUDIO],
             system_instruction=types.Content(
-                parts=[types.Part.from_text(text=self.adk_agent.instruction)]
+                parts=[types.Part.from_text(text=self.system_instruction)]
             ),
             voice_name="Aoede"  # Gemini's default female voice
         )
 
         async with self.client.aio.live.connect(
-            model=self.adk_agent.model, config=config
+            model=self.model_name, config=config
         ) as session:
-            logger.info("ADK Agent is active and listening in LiveKit room!")
-            self.session_service.create_session(
-                user_id="livekit_user",
-                session_id="voice_session_01"
-            )
+            logger.info("Agent is active and listening in LiveKit room!")
 
             tasks = [
                 asyncio.create_task(self._publish_agent_audio()),
@@ -452,21 +443,26 @@ class ADKLiveKitAgent:
 
 
 async def main():
-    """Entry point for the ADK LiveKit UI integration agent."""
+    """Entry point for the LiveKit UI integration agent."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
         datefmt="%H:%M:%S",
     )
 
-    required = ["GEMINI_API_KEY", "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
+    required = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
     missing = [e for e in required if not os.getenv(e)]
+
+    has_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if not has_api_key:
+        missing.append("GOOGLE_API_KEY")
+
     if missing:
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         return
 
-    agent = ADKLiveKitAgent(
-        room_name=os.getenv("LIVEKIT_ROOM", "gemini-adk-room")
+    agent = LiveKitAgent(
+        room_name=os.getenv("LIVEKIT_ROOM", "gemini-room")
     )
     task = asyncio.create_task(agent.start())
     try:

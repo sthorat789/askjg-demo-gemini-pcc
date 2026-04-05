@@ -24,8 +24,7 @@ python-dotenv
 google-auth>=2.0.0
 
 # ---------------------------------------------------------------------------
-# Additional dependencies for livekit_ui_integration.py (ADK backend)
+# Additional dependencies for livekit_ui_integration.py (optional backend)
 # ---------------------------------------------------------------------------
-
-# Google ADK (Agent Development Kit) for agent orchestration
-google-adk>=0.1.0
+# No additional dependencies — reuses google-genai, livekit, and onnxruntime
+# already listed above.
