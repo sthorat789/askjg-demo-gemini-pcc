@@ -59,10 +59,7 @@ def _make_analyzer(model_confidence: float = 0.9) -> SileroVADAnalyzer:
 
 
 def _make_loud_chunk() -> bytes:
-    """Create a loud audio chunk (high RMS volume)."""
-    # Sine wave with amplitude ~16000 → RMS ≈ 0.345 (above VAD_MIN_VOLUME=0.6 when loud enough)
-    # Use amplitude 25000 for RMS ≈ 0.54, still below 0.6
-    # Use amplitude 30000 for RMS ≈ 0.65 → above VAD_MIN_VOLUME
+    """Create a loud audio chunk with RMS volume above VAD_MIN_VOLUME (0.6)."""
     samples = np.full(CHUNK_SIZE, 30000, dtype=np.int16)
     return samples.tobytes()
 
