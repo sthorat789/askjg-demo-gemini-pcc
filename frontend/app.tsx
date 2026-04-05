@@ -88,9 +88,12 @@ function AgentInterface() {
   // Hook 2: Monitor if the local user is speaking (Frontend Mic VAD)
   const tracks = useTracks([Track.Source.Microphone]);
   const userTrack = tracks.find((t) => t.participant.isLocal);
-  const { isSpeaking: isUserSpeaking } = useParticipant(
-    userTrack?.participant ?? ({} as any)
-  );
+  // useParticipant requires a participant object; when there is no local
+  // audio track yet we pass undefined and default isSpeaking to false.
+  const participantInfo = useParticipant(userTrack?.participant);
+  const isUserSpeaking = userTrack?.participant
+    ? participantInfo.isSpeaking
+    : false;
 
   // Process incoming state updates from the Python Backend Data Channel
   useEffect(() => {
@@ -106,7 +109,7 @@ function AgentInterface() {
           setMessage(parsed.message);
         }
       } catch (e) {
-        console.error("Failed to parse backend UI state:", e);
+        console.error("Failed to parse backend UI state:", rawString, e);
       }
     }
   }, [dataChannelMessage]);

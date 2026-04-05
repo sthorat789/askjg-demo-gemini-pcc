@@ -146,6 +146,9 @@ class SileroVADAnalyzer:
         audio_int16 = np.frombuffer(audio_chunk, dtype=np.int16)
         volume = np.max(np.abs(audio_int16)) / 32768.0
 
+        # Skip inference for very quiet frames (below 10% of the minimum
+        # volume threshold) to save CPU.  At this level the signal is
+        # indistinguishable from background noise.
         if volume < VAD_MIN_VOLUME * 0.1:
             confidence = 0.0
         else:
@@ -419,7 +422,7 @@ class ADKLiveKitAgent:
             system_instruction=types.Content(
                 parts=[types.Part.from_text(text=self.adk_agent.instruction)]
             ),
-            voice_name="Aoede"
+            voice_name="Aoede"  # Gemini's default female voice
         )
 
         async with self.client.aio.live.connect(
