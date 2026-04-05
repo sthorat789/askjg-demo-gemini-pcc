@@ -11,7 +11,7 @@ livekit>=0.18.0
 # LiveKit API (token generation) — optional if providing pre-generated tokens
 livekit-api>=0.7.0
 
-# Silero VAD ONNX model inference
+# Silero VAD ONNX model inference (used by vad/silero_vad.py)
 onnxruntime>=1.16.0
 
 # Audio processing
@@ -22,3 +22,13 @@ python-dotenv
 
 # Optional: Google auth for Vertex AI
 google-auth>=2.0.0
+
+# ---------------------------------------------------------------------------
+# Additional dependencies for livekit_ui_integration.py (ADK backend)
+# ---------------------------------------------------------------------------
+
+# Google ADK (Agent Development Kit) for agent orchestration
+google-adk>=0.1.0
+
+# PyTorch — used by ADK integration's Silero VAD (alternative to ONNX)
+torch>=2.0.0
