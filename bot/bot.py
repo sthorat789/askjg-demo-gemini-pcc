@@ -40,6 +40,7 @@ from pipecat.transports.websocket.fastapi import (
 
 from pipelines import create_pipeline
 from call_recorder import CallRecorder, RecordingMode
+from core.health import HEALTH_STATE, ensure_health_server
 from core.prompts import load_system_prompt_async
 from end_of_call_reporter import EndedReason, EndOfCallReporter
 from transport_context import TransportContext, build_transport_context
@@ -93,6 +94,8 @@ async def run_bot(
         sample_rate: Audio sample rate (16000 for Daily/WebRTC)
     """
     bot_name = os.getenv("BOT_NAME", "Maya")
+    await ensure_health_server()
+    HEALTH_STATE.mark_session_started(context.transport, sample_rate)
     logger.info(
         f"Starting {bot_name} demo bot (transport={context.transport}, "
         f"sample_rate={sample_rate}Hz, RTVI={enable_rtvi})"
@@ -169,6 +172,7 @@ async def run_bot(
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         client_connected.set()  # Cancel timeout watchdog
+        HEALTH_STATE.mark_client_connected()
         logger.info(f"Client connected to {bot_name} demo")
         # Mark call start time (aligns with recording start)
         reporter.set_started_at()
@@ -181,6 +185,7 @@ async def run_bot(
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
+        HEALTH_STATE.mark_client_disconnected()
         logger.info(f"Client disconnected from {bot_name} demo")
         # Mark call end time for reporting
         reporter.set_ended_at()
@@ -227,6 +232,7 @@ async def run_bot(
             reason = frame.reason or EndedReason.CUSTOMER_ENDED_CALL
 
         logger.info(f"Pipeline finished with reason: {reason}")
+        HEALTH_STATE.mark_session_finished(reason)
         reporter.set_ended_reason(reason)
 
         # Ensure ended_at is set (may not be if pipeline ended before disconnect)
@@ -254,7 +260,12 @@ async def run_bot(
 
     runner = PipelineRunner(handle_sigint=handle_sigint)
     asyncio.create_task(wait_for_client_connection())
-    await runner.run(task)
+    try:
+        await runner.run(task)
+    except Exception as exc:
+        HEALTH_STATE.mark_error(exc)
+        HEALTH_STATE.mark_not_ready()
+        raise
 
 
 # Pipecat Cloud entry point

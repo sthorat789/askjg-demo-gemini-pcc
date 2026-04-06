@@ -160,19 +160,12 @@ python -m custom_voice_agent.main
 
 Both endpoints are served by the Python backend on `PORT` (default `8080`).
 
-## Frontend Scope
-
-The `frontend/` directory remains an optional demo UI and is not packaged into the
-production container. Production readiness for this service is defined around the
-backend voice agent plus the health/readiness endpoint above.
-
 ## Project Layout
 
 ```text
 custom_voice_agent/
 ├── src/custom_voice_agent/    # Python package source
 ├── tests/                     # Backend tests
-├── frontend/                  # Optional demo UI
 ├── Dockerfile                 # Container build
 ├── pyproject.toml             # Package metadata
 └── supervisord.conf           # Container runtime process config
