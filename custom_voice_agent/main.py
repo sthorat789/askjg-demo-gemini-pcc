@@ -158,6 +158,7 @@ def _build_gemini_config() -> GeminiLiveConfig:
 
     # Load system prompt
     system_prompt = _load_system_prompt()
+    thinking_budget = int(os.getenv("THINKING_BUDGET_TOKENS", "0"))
 
     if model_type == "preview":
         api_key = os.getenv("GOOGLE_API_KEY")
@@ -169,6 +170,10 @@ def _build_gemini_config() -> GeminiLiveConfig:
             api_key=api_key,
             system_instruction=system_prompt,
             voice_id="Aoede",
+            max_tokens=8192,
+            enable_affective_dialog=True,
+            proactive_audio=True,
+            thinking_budget_tokens=thinking_budget,
             api_version="v1alpha",
             connect_timeout_secs=_get_positive_float("GEMINI_CONNECT_TIMEOUT_SECS", 20.0),
             send_timeout_secs=_get_positive_float("GEMINI_SEND_TIMEOUT_SECS", 10.0),
@@ -197,6 +202,8 @@ def _build_gemini_config() -> GeminiLiveConfig:
             location=location,
             system_instruction=system_prompt,
             voice_id="Aoede",
+            max_tokens=8192,
+            enable_affective_dialog=True,
             connect_timeout_secs=_get_positive_float("GEMINI_CONNECT_TIMEOUT_SECS", 20.0),
             send_timeout_secs=_get_positive_float("GEMINI_SEND_TIMEOUT_SECS", 10.0),
             close_timeout_secs=_get_positive_float("GEMINI_CLOSE_TIMEOUT_SECS", 5.0),

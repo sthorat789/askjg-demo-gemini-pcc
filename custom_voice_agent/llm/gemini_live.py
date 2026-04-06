@@ -29,7 +29,9 @@ try:
         LiveConnectConfig,
         Part,
         PrebuiltVoiceConfig,
+        ProactivityConfig,
         SpeechConfig,
+        ThinkingConfig,
         VoiceConfig,
     )
 except ImportError:
@@ -64,6 +66,8 @@ class GeminiLiveConfig:
     voice_id: str = "Aoede"
     max_tokens: int = 8192
     enable_affective_dialog: bool = True
+    proactive_audio: bool = False
+    thinking_budget_tokens: int = 0
 
     # API version (needed for some features)
     api_version: Optional[str] = None
@@ -176,24 +180,7 @@ class GeminiLiveSession:
             else:
                 raise ValueError("Either api_key or credentials must be provided")
 
-            live_config = LiveConnectConfig(
-                response_modalities=["AUDIO"],
-                generation_config=GenerationConfig(
-                    max_output_tokens=config.max_tokens,
-                ),
-                speech_config=SpeechConfig(
-                    voice_config=VoiceConfig(
-                        prebuilt_voice_config=PrebuiltVoiceConfig(
-                            voice_name=config.voice_id,
-                        )
-                    )
-                ),
-            )
-
-            if config.system_instruction:
-                live_config.system_instruction = Content(
-                    parts=[Part(text=config.system_instruction)]
-                )
+            live_config = self._build_live_connect_config()
 
             last_error: Optional[Exception] = None
             for attempt in range(1, config.connect_retries + 1):
@@ -389,6 +376,42 @@ class GeminiLiveSession:
             and not self._receive_task.done(),
             "last_error": self._last_error,
         }
+
+    def _build_live_connect_config(self) -> LiveConnectConfig:
+        """Build the live connect config so it can be parity-tested."""
+        config = self._config
+        live_config = LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            generation_config=GenerationConfig(
+                max_output_tokens=config.max_tokens,
+            ),
+            speech_config=SpeechConfig(
+                voice_config=VoiceConfig(
+                    prebuilt_voice_config=PrebuiltVoiceConfig(
+                        voice_name=config.voice_id,
+                    )
+                )
+            ),
+        )
+
+        if config.system_instruction:
+            live_config.system_instruction = Content(
+                parts=[Part(text=config.system_instruction)]
+            )
+
+        if config.enable_affective_dialog:
+            live_config.enable_affective_dialog = True
+
+        if config.proactive_audio:
+            live_config.proactivity = ProactivityConfig(proactive_audio=True)
+
+        if config.thinking_budget_tokens > 0:
+            live_config.thinking_config = ThinkingConfig(
+                include_thoughts=False,
+                thinking_budget=config.thinking_budget_tokens,
+            )
+
+        return live_config
 
     async def _run_session_call(self, action: str, operation):
         try:
