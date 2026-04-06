@@ -216,7 +216,8 @@ def _load_system_prompt() -> str:
     """Load system prompt from the prompts directory."""
     from pathlib import Path
 
-    for candidate_root in [*Path(__file__).resolve().parents, Path.cwd()]:
+    candidate_roots = tuple(Path(__file__).resolve().parents) + (Path.cwd(),)
+    for candidate_root in candidate_roots:
         prompt_path = candidate_root / "bot" / "prompts" / "demo_system_prompt.md"
         if prompt_path.exists():
             return prompt_path.read_text()
