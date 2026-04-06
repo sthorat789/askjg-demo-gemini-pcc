@@ -209,8 +209,8 @@ class GeminiLiveSession:
                     return
                 except Exception as exc:
                     last_error = exc
-                    self._session = None
                     self._connected = False
+                    self._session = None
                     if attempt >= config.connect_retries:
                         break
                     delay = config.retry_backoff_secs * attempt

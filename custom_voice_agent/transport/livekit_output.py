@@ -334,7 +334,9 @@ class LiveKitOutput:
                     await task
                 except asyncio.CancelledError:
                     pass
-        self._send_task = None
+                self._send_task = None
+        elif task is None or task.done():
+            self._send_task = None
 
     def _drain_queue(self) -> int:
         drained = 0

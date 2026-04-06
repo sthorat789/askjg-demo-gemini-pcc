@@ -198,6 +198,7 @@ class SileroVAD:
 
         # Thread pool for non-blocking inference
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vad")
+        self._closed = False
 
         logger.info(
             f"SileroVAD initialized: sample_rate={sample_rate}, "
@@ -215,6 +216,11 @@ class SileroVAD:
     def state(self) -> VADState:
         """Current VAD state."""
         return self._state
+
+    @property
+    def is_closed(self) -> bool:
+        """Whether the VAD executor has been shut down."""
+        return self._closed
 
     @staticmethod
     def _get_default_model_path() -> str:
@@ -286,6 +292,8 @@ class SileroVAD:
             VADEvent indicating any state transition.
         """
         loop = asyncio.get_running_loop()
+        if self._closed:
+            raise RuntimeError("SileroVAD has been closed")
         confidence, volume = await loop.run_in_executor(
             self._executor, self._run_inference, audio_bytes
         )
@@ -346,10 +354,16 @@ class SileroVAD:
 
     def reset(self):
         """Reset VAD state (e.g., on new conversation)."""
+        if self._closed:
+            return
         self._state = VADState.QUIET
         self._accumulator_frames = 0
         self._model.reset_state()
 
     def close(self):
         """Shut down the thread pool."""
+        if self._closed:
+            return
+        self._closed = True
         self._executor.shutdown(wait=False)
+        self._executor = None

@@ -201,7 +201,8 @@ class VoiceAgent:
             self._bot_speaking = False
             self._stop_task = None
 
-            if getattr(self._vad, "_executor", None) is None:
+            if self._vad.is_closed:
+                self._vad.close()
                 self._vad = SileroVAD(
                     sample_rate=self._input_sample_rate,
                     params=self._vad_params,
@@ -477,7 +478,6 @@ class VoiceAgent:
 
         try:
             self._vad.close()
-            self._vad._executor = None
         except Exception:
             logger.debug("%s Error while closing VAD", self._log_prefix, exc_info=True)
 
