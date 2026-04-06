@@ -1,0 +1,50 @@
+# =============================================================================
+# Custom Voice Agent — .gitignore
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Node / frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude
+.claude/settings.local.json
+
+# Environment and secrets
+.env*
+!.env*.example
+credentials.json
+
+# Reference and docs (local only)
+_refs/
+_docs/
+
+# uv
+.python-version
+
+# OS
+.DS_Store
+Thumbs.db
