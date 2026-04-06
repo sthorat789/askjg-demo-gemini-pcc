@@ -174,17 +174,16 @@ This grants the `storage.objectUser` role which allows:
 
 ### Step 8: Recording Access Configuration
 
-Recordings are stored in GCS and accessed through the frontend dashboard. There are two options:
+This repository stores recordings in GCS only. There is no bundled dashboard or
+authenticated proxy service in the shipped production runtime, so access is
+controlled entirely by your bucket policy.
 
-#### Option A: Private Bucket with Authenticated Proxy (Recommended)
+#### Option A: Private Bucket (Recommended)
 
-Keep the bucket private (default). The frontend dashboard proxies recordings through an authenticated API route, so only logged-in users can access them.
+Keep the bucket private (default) and access recordings with your own
+authenticated tooling or internal systems.
 
-**Requirements:**
-- Frontend must have `GOOGLE_VERTEX_CREDENTIALS` configured (same credentials as the bot)
-- No additional bucket permissions needed beyond Step 7
-
-This is the recommended approach for production use.
+No additional bucket permissions are needed beyond Step 7.
 
 #### Option B: Public Bucket (Simple but Less Secure)
 
@@ -263,7 +262,7 @@ Pipecat Cloud uses secret sets to securely store credentials. The `$(cat ...)` s
 
 **Basic deployment (Gemini Live only):**
 ```bash
-pipecat cloud secrets set your-google-credentials \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1"
@@ -271,7 +270,7 @@ pipecat cloud secrets set your-google-credentials \
 
 **With call recording:**
 ```bash
-pipecat cloud secrets set your-google-credentials \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1" \
@@ -281,7 +280,7 @@ pipecat cloud secrets set your-google-credentials \
 
 **With webhook reporting:**
 ```bash
-pipecat cloud secrets set your-google-credentials \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1" \
@@ -293,7 +292,7 @@ pipecat cloud secrets set your-google-credentials \
 
 Verify your secrets were set:
 ```bash
-pipecat cloud secrets list your-google-credentials
+pipecat cloud secrets list askjg-demo-gemini-pcc-credentials
 ```
 
 ### Step 3: Deploy
@@ -318,7 +317,7 @@ To add or update individual secrets without re-setting everything:
 
 ```bash
 # Add or update webhook configuration
-pipecat cloud secrets set your-google-credentials \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   WEBHOOK_URL="https://your-webhook-endpoint.com/api/call-reports" \
   WEBHOOK_API_KEY="your-api-key"
 ```
@@ -339,6 +338,13 @@ pipecat cloud docker build-push && pipecat cloud deploy pcc-deploy.toml
 pipecat cloud logs askjg-demo-gemini-pcc
 ```
 
+### Health Checks
+
+The production container exposes:
+
+- `GET /healthz` — liveness and diagnostic payload
+- `GET /readyz` — readiness probe for the bot process
+
 ---
 
 ## Environment Variables Reference
@@ -357,6 +363,7 @@ pipecat cloud logs askjg-demo-gemini-pcc
 | `THINKING_BUDGET_TOKENS` | No | `0` | 0=disabled, 512-1024 for reasoning |
 | **Bot Configuration** ||||
 | `BOT_NAME` | No | `Maya` | Bot name in greeting |
+| `PORT` | No | `8080` | Health/readiness probe port |
 | `MAX_CALL_DURATION_SECS` | No | `840` | Max call duration (14 min) |
 | `USER_IDLE_TIMEOUT_SECS` | No | `120` | Idle timeout before ending call |
 | **Call Recording** ||||
@@ -382,6 +389,7 @@ bot/
     base.py                 # PipelineConfig dataclass
     gemini.py               # Gemini Live pipeline
   core/
+    health.py                # Health/readiness HTTP server
     observers.py            # RTVI observer for Voice UI Kit
     prompts.py              # Prompt loading utilities
   prompts/

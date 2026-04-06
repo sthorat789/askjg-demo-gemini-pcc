@@ -5,6 +5,7 @@ ENV UV_COMPILE_BYTECODE=1
 
 # Copy from the cache instead of linking since it's a mounted volume
 ENV UV_LINK_MODE=copy
+ENV PORT=8080
 
 # Install the project's dependencies using the lockfile and settings
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -21,3 +22,5 @@ COPY ./bot/prompts/ prompts/
 COPY ./bot/transport_context.py transport_context.py
 COPY ./bot/call_recorder.py call_recorder.py
 COPY ./bot/end_of_call_reporter.py end_of_call_reporter.py
+
+EXPOSE 8080

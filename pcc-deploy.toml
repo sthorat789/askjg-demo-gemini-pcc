@@ -5,14 +5,11 @@ agent_name = "askjg-demo-gemini-pcc"
 
 # Docker image on GitHub Container Registry
 # Build with: pipecat cloud docker build-push
-image = "ghcr.io/your-org/askjg-demo-gemini-pcc:latest"
-
-# Credentials for pulling from private ghcr.io registry
-image_credentials = "your-ghcr-credentials"
+image = "ghcr.io/sthorat789/askjg-demo-gemini-pcc:latest"
 
 # Secret set containing Google Vertex credentials
-# Create with: pipecat cloud secrets set your-google-credentials ...
-secret_set = "your-google-credentials"
+# Create with: pipecat cloud secrets set askjg-demo-gemini-pcc-credentials ...
+secret_set = "askjg-demo-gemini-pcc-credentials"
 
 # Agent compute profile
 agent_profile = "agent-1x"
@@ -24,3 +21,6 @@ region = "us-west"
     # Keep 1 warm instance for fast response
     min_agents = 1
     max_agents = 4
+
+[ports]
+    health = 8080
