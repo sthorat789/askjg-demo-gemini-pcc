@@ -1,0 +1,33 @@
+# Pipecat Cloud deployment configuration for the Custom Voice Agent
+# See: https://docs.pipecat.ai/deployment/pipecat-cloud/
+
+agent_name = "custom-voice-agent"
+
+# Docker image on GitHub Container Registry
+# Build with: docker build -t ghcr.io/your-org/custom-voice-agent:latest ./custom_voice_agent
+#             docker push ghcr.io/your-org/custom-voice-agent:latest
+image = "ghcr.io/your-org/custom-voice-agent:latest"
+
+# Credentials for pulling from private ghcr.io registry
+image_credentials = "your-ghcr-credentials"
+
+# Secret set containing LiveKit + Google credentials
+# Create with: pipecat cloud secrets set your-custom-agent-credentials ...
+secret_set = "your-custom-agent-credentials"
+
+# Agent compute profile
+agent_profile = "agent-1x"
+
+# Deployment region
+region = "us-west"
+
+[scaling]
+    # Keep 1 warm instance for fast response
+    min_agents = 1
+    max_agents = 4
+
+[ports]
+    # Frontend (Next.js)
+    frontend = 3000
+    # Backend (Python agent HTTP endpoint)
+    backend = 8080

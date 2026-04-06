@@ -1,0 +1,41 @@
+# Custom Voice Agent — Docker ignore
+#
+# Keeps the Docker build context lean by excluding files that are not
+# needed inside the image.
+
+# Git
+.git/
+.gitignore
+
+# Environment files and secrets (injected at runtime via --env-file)
+.env*
+credentials.json
+
+# Documentation
+*.md
+docs/
+
+# Python artefacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Node / frontend build artefacts (rebuilt inside Docker)
+frontend/node_modules/
+frontend/.next/
+
+# Test code
+tests/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local context
+_docs/
+_refs/
+.claude/
+
+# Supervisor logs (written at runtime)
+/var/log/supervisor/
