@@ -202,7 +202,6 @@ class VoiceAgent:
             self._stop_task = None
 
             if self._vad.is_closed:
-                self._vad.close()
                 self._vad = SileroVAD(
                     sample_rate=self._input_sample_rate,
                     params=self._vad_params,

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -105,47 +106,74 @@ class TestHealthServer:
 
 
 class TestGeminiTurnSettings:
-    def test_live_connect_config_matches_preview_bot_settings(self):
-        session = GeminiLiveSession(
-            GeminiLiveConfig(
-                api_key="secret-key",
-                system_instruction="hi",
-                voice_id="Aoede",
-                max_tokens=8192,
-                enable_affective_dialog=True,
-                proactive_audio=True,
-                thinking_budget_tokens=64,
-                api_version="v1alpha",
+    def test_gemini_session_config_matches_preview_bot_settings(self):
+        with patch.multiple(
+            "custom_voice_agent.llm.gemini_live",
+            LiveConnectConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            SpeechConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            VoiceConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            PrebuiltVoiceConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            Content=lambda **kwargs: SimpleNamespace(**kwargs),
+            Part=lambda **kwargs: SimpleNamespace(**kwargs),
+            ProactivityConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            ThinkingConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        ):
+            session = GeminiLiveSession(
+                GeminiLiveConfig(
+                    api_key="secret-key",
+                    system_instruction="hi",
+                    voice_id="Aoede",
+                    max_tokens=8192,
+                    enable_affective_dialog=True,
+                    proactive_audio=True,
+                    thinking_budget_tokens=64,
+                    api_version="v1alpha",
+                )
             )
-        )
 
-        live_config = session._build_live_connect_config()
+            live_config = session._build_live_connect_config()
 
-        assert live_config.response_modalities == ["AUDIO"]
-        assert live_config.generation_config.max_output_tokens == 8192
-        assert live_config.enable_affective_dialog is True
-        assert live_config.proactivity.proactive_audio is True
-        assert live_config.thinking_config.include_thoughts is False
-        assert live_config.thinking_config.thinking_budget == 64
-        assert live_config.speech_config.voice_config.prebuilt_voice_config.voice_name == "Aoede"
-
-    def test_live_connect_config_matches_ga_bot_settings(self):
-        session = GeminiLiveSession(
-            GeminiLiveConfig(
-                credentials='{"type":"service_account"}',
-                project_id="demo-project",
-                system_instruction="hi",
-                voice_id="Aoede",
-                max_tokens=8192,
-                enable_affective_dialog=True,
+            assert live_config.response_modalities == ["AUDIO"]
+            assert live_config.generation_config.max_output_tokens == 8192
+            assert live_config.enable_affective_dialog is True
+            assert live_config.proactivity.proactive_audio is True
+            assert live_config.thinking_config.include_thoughts is False
+            assert live_config.thinking_config.thinking_budget == 64
+            assert (
+                live_config.speech_config.voice_config.prebuilt_voice_config.voice_name
+                == "Aoede"
             )
-        )
 
-        live_config = session._build_live_connect_config()
+    def test_gemini_session_config_matches_ga_bot_settings(self):
+        with patch.multiple(
+            "custom_voice_agent.llm.gemini_live",
+            LiveConnectConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            GenerationConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            SpeechConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            VoiceConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            PrebuiltVoiceConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            Content=lambda **kwargs: SimpleNamespace(**kwargs),
+            Part=lambda **kwargs: SimpleNamespace(**kwargs),
+            ProactivityConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+            ThinkingConfig=lambda **kwargs: SimpleNamespace(**kwargs),
+        ):
+            session = GeminiLiveSession(
+                GeminiLiveConfig(
+                    credentials='{"type":"service_account"}',
+                    project_id="demo-project",
+                    system_instruction="hi",
+                    voice_id="Aoede",
+                    max_tokens=8192,
+                    enable_affective_dialog=True,
+                )
+            )
 
-        assert live_config.enable_affective_dialog is True
-        assert live_config.proactivity is None
-        assert live_config.thinking_config is None
+            live_config = session._build_live_connect_config()
+
+            assert live_config.enable_affective_dialog is True
+            assert not hasattr(live_config, "proactivity")
+            assert not hasattr(live_config, "thinking_config")
 
 
 class TestAgentTurnSignals:
