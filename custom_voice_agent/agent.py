@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import time
+import uuid
 from typing import Callable, Coroutine, Optional
 
 from custom_voice_agent.frames import (
@@ -91,26 +92,30 @@ class VoiceAgent:
         """
         self._room = room
         self._bot_name = bot_name
+        self._session_id = uuid.uuid4().hex
         self._max_duration = max_call_duration_secs
         self._idle_timeout = user_idle_timeout_secs
         self._input_sample_rate = input_sample_rate
         self._output_sample_rate = output_sample_rate
+        self._vad_params = vad_params or VADParams()
 
         # Core components
         self._vad = SileroVAD(
             sample_rate=input_sample_rate,
-            params=vad_params or VADParams(),
+            params=self._vad_params,
         )
-        self._gemini = GeminiLiveSession(gemini_config)
+        self._gemini = GeminiLiveSession(gemini_config, session_id=self._session_id)
         self._lk_input = LiveKitInput(
             room,
             on_audio_frame=self._handle_audio_input,
             target_sample_rate=input_sample_rate,
+            session_id=self._session_id,
         )
         self._lk_output = LiveKitOutput(
             room,
             sample_rate=output_sample_rate,
             livekit_sample_rate=48000,
+            session_id=self._session_id,
         )
 
         # State tracking
@@ -118,6 +123,11 @@ class VoiceAgent:
         self._bot_speaking = False
         self._running = False
         self._ended_reason: Optional[str] = None
+        self._last_error: Optional[str] = None
+        self._start_lock = asyncio.Lock()
+        self._stop_lock = asyncio.Lock()
+        self._stop_task: Optional[asyncio.Task] = None
+        self._call_ended_notified = False
 
         # Timers
         self._session_timer_task: Optional[asyncio.Task] = None
@@ -144,6 +154,21 @@ class VoiceAgent:
         self._gemini.on_text_output = self._handle_gemini_text
         self._gemini.on_turn_complete = self._handle_turn_complete
         self._gemini.on_interrupted = self._handle_gemini_interrupted
+        self._gemini.on_failure = self._handle_component_failure
+        self._lk_input.on_failure = self._handle_component_failure
+        self._lk_output.on_failure = self._handle_component_failure
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    @property
+    def _log_prefix(self) -> str:
+        return f"[session_id={self._session_id}]"
 
     async def start(self):
         """Start the voice agent.
@@ -154,31 +179,52 @@ class VoiceAgent:
         3. Starts session timer and idle detection
         4. Triggers the initial greeting
         """
-        logger.info(
-            f"Starting VoiceAgent '{self._bot_name}' "
-            f"(max_duration={self._max_duration}s, idle_timeout={self._idle_timeout}s)"
-        )
+        async with self._start_lock:
+            if self._running:
+                return
 
-        self._running = True
-        self._last_user_activity = time.monotonic()
+            logger.info(
+                "%s Starting VoiceAgent '%s' (max_duration=%ss, idle_timeout=%ss)",
+                self._log_prefix,
+                self._bot_name,
+                self._max_duration,
+                self._idle_timeout,
+            )
 
-        # Connect to Gemini
-        await self._gemini.connect()
+            self._running = True
+            self._ended_reason = None
+            self._last_error = None
+            self._call_ended_notified = False
+            self._last_user_activity = time.monotonic()
+            self._vad_buffer.clear()
+            self._user_speaking = False
+            self._bot_speaking = False
+            self._stop_task = None
 
-        # Start LiveKit I/O
-        await self._lk_input.start()
-        await self._lk_output.start()
+            if self._vad.is_closed:
+                self._vad = SileroVAD(
+                    sample_rate=self._input_sample_rate,
+                    params=self._vad_params,
+                )
 
-        # Start safeguard timers
-        self._session_timer_task = asyncio.create_task(self._session_timer())
-        self._idle_timer_task = asyncio.create_task(self._idle_timer())
+            try:
+                await self._gemini.connect()
+                await self._lk_input.start()
+                await self._lk_output.start()
 
-        # Trigger initial greeting
-        await self._gemini.send_text(
-            f"Start the conversation. Introduce yourself as {self._bot_name}."
-        )
+                self._session_timer_task = asyncio.create_task(self._session_timer())
+                self._idle_timer_task = asyncio.create_task(self._idle_timer())
 
-        logger.info("VoiceAgent started — waiting for user")
+                await self._gemini.send_text(
+                    f"Start the conversation. Introduce yourself as {self._bot_name}."
+                )
+            except Exception:
+                self._running = False
+                logger.exception("%s VoiceAgent failed to start", self._log_prefix)
+                await self._shutdown_components()
+                raise
+
+            logger.info("%s VoiceAgent started — waiting for user", self._log_prefix)
 
     async def stop(self, reason: Optional[str] = None):
         """Stop the voice agent gracefully.
@@ -186,40 +232,62 @@ class VoiceAgent:
         Args:
             reason: Why the call ended (EndedReason constant).
         """
-        if not self._running:
-            return
+        async with self._stop_lock:
+            if self._ended_reason is None:
+                self._ended_reason = reason or EndedReason.CUSTOMER_ENDED_CALL
+            elif reason and self._ended_reason == EndedReason.CUSTOMER_ENDED_CALL:
+                self._ended_reason = reason
 
-        self._running = False
-        self._ended_reason = reason or EndedReason.CUSTOMER_ENDED_CALL
-        logger.info(f"Stopping VoiceAgent (reason={self._ended_reason})")
+            if not self._running and self._call_ended_notified:
+                return
 
-        # Cancel timers
-        for task in [self._session_timer_task, self._idle_timer_task]:
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            self._running = False
+            logger.info(
+                "%s Stopping VoiceAgent (reason=%s)",
+                self._log_prefix,
+                self._ended_reason,
+            )
 
-        # Stop components in reverse order
-        await self._lk_output.stop()
-        await self._lk_input.stop()
-        await self._gemini.disconnect()
+            await self._cancel_task(self._session_timer_task)
+            await self._cancel_task(self._idle_timer_task)
+            self._session_timer_task = None
+            self._idle_timer_task = None
 
-        # Cleanup VAD
-        self._vad.close()
+            await self._shutdown_components()
 
-        # Notify listener
-        if self.on_call_ended:
-            await self.on_call_ended(self._ended_reason)
+            if self.on_call_ended and not self._call_ended_notified:
+                self._call_ended_notified = True
+                await self.on_call_ended(self._ended_reason)
 
-        logger.info("VoiceAgent stopped")
+            logger.info("%s VoiceAgent stopped", self._log_prefix)
 
     @property
     def ended_reason(self) -> Optional[str]:
         """Why the call ended, or None if still running."""
         return self._ended_reason
+
+    def request_stop(self, reason: Optional[str] = None):
+        """Schedule a safe asynchronous stop without self-cancellation."""
+        if self._stop_task and not self._stop_task.done():
+            return self._stop_task
+
+        self._stop_task = asyncio.create_task(self.stop(reason=reason))
+        self._stop_task.add_done_callback(self._log_stop_result)
+        return self._stop_task
+
+    def health_snapshot(self) -> dict:
+        return {
+            "session_id": self._session_id,
+            "running": self._running,
+            "ended_reason": self._ended_reason,
+            "user_speaking": self._user_speaking,
+            "bot_speaking": self._bot_speaking,
+            "last_error": self._last_error,
+            "idle_for_secs": max(0.0, time.monotonic() - self._last_user_activity),
+            "transport_input": self._lk_input.health_snapshot(),
+            "transport_output": self._lk_output.health_snapshot(),
+            "gemini": self._gemini.health_snapshot(),
+        }
 
     # -----------------------------------------------------------------------
     # Audio input processing (LiveKit → VAD → Gemini)
@@ -312,6 +380,8 @@ class VoiceAgent:
 
     async def _handle_gemini_text(self, text: str):
         """Handle text transcript from Gemini (bot's speech as text)."""
+        if not self._running:
+            return
         if self.on_bot_text:
             await self.on_bot_text(text)
 
@@ -359,9 +429,11 @@ class VoiceAgent:
             await asyncio.sleep(self._max_duration)
             if self._running:
                 logger.warning(
-                    f"Session max duration ({self._max_duration}s) reached, ending call"
+                    "%s Session max duration (%ss) reached, ending call",
+                    self._log_prefix,
+                    self._max_duration,
                 )
-                await self.stop(reason=EndedReason.EXCEEDED_MAX_DURATION)
+                self.request_stop(reason=EndedReason.EXCEEDED_MAX_DURATION)
         except asyncio.CancelledError:
             pass
 
@@ -374,9 +446,53 @@ class VoiceAgent:
                 idle_time = time.monotonic() - self._last_user_activity
                 if idle_time >= self._idle_timeout:
                     logger.warning(
-                        f"User idle timeout ({self._idle_timeout}s) reached, ending call"
+                        "%s User idle timeout (%ss) reached, ending call",
+                        self._log_prefix,
+                        self._idle_timeout,
                     )
-                    await self.stop(reason=EndedReason.SILENCE_TIMED_OUT)
+                    self.request_stop(reason=EndedReason.SILENCE_TIMED_OUT)
                     return
         except asyncio.CancelledError:
             pass
+
+    async def _handle_component_failure(self, message: str):
+        self._last_error = message
+        logger.error("%s %s", self._log_prefix, message)
+        self.request_stop(reason=EndedReason.PIPELINE_ERROR)
+
+    async def _shutdown_components(self):
+        results = await asyncio.gather(
+            self._lk_output.stop(),
+            self._lk_input.stop(),
+            self._gemini.disconnect(),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logger.exception(
+                    "%s Error while shutting down VoiceAgent component",
+                    self._log_prefix,
+                    exc_info=result,
+                )
+
+        try:
+            self._vad.close()
+        except Exception:
+            logger.debug("%s Error while closing VAD", self._log_prefix, exc_info=True)
+
+    async def _cancel_task(self, task: Optional[asyncio.Task]):
+        if task and not task.done():
+            task.cancel()
+            if task is not asyncio.current_task():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    def _log_stop_result(self, task: asyncio.Task):
+        if task.cancelled():
+            return
+        try:
+            task.result()
+        except Exception:
+            logger.exception("%s VoiceAgent stop task failed", self._log_prefix)

@@ -1,5 +1,4 @@
-# Pipecat Cloud deployment configuration for the Custom Voice Agent
-# See: https://docs.pipecat.ai/deployment/pipecat-cloud/
+# Pipecat Cloud deployment configuration for the backend voice agent.
 
 agent_name = "custom-voice-agent"
 
@@ -27,7 +26,5 @@ region = "us-west"
     max_agents = 4
 
 [ports]
-    # Frontend (Next.js)
-    frontend = 3000
-    # Backend (Python agent HTTP endpoint)
+    # Backend health/readiness endpoint
     backend = 8080

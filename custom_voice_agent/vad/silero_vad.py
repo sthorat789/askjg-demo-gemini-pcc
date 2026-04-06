@@ -12,8 +12,10 @@
 #
 
 import asyncio
+import hashlib
 import logging
 import math
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -23,6 +25,10 @@ from typing import Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL_FILENAME = "silero_vad.onnx"
+MODEL_PATH_ENV = "SILERO_VAD_MODEL_PATH"
+MODEL_SHA256_ENV = "SILERO_VAD_MODEL_SHA256"
 
 # ---------------------------------------------------------------------------
 # VAD state machine
@@ -192,6 +198,7 @@ class SileroVAD:
 
         # Thread pool for non-blocking inference
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="vad")
+        self._closed = False
 
         logger.info(
             f"SileroVAD initialized: sample_rate={sample_rate}, "
@@ -210,26 +217,43 @@ class SileroVAD:
         """Current VAD state."""
         return self._state
 
+    @property
+    def is_closed(self) -> bool:
+        """Whether the VAD executor has been shut down."""
+        return self._closed
+
     @staticmethod
     def _get_default_model_path() -> str:
-        """Get path to bundled silero_vad.onnx model.
-
-        Downloads the model from the Silero GitHub repo if not present.
-        """
-        model_dir = Path(__file__).parent
-        model_path = model_dir / "silero_vad.onnx"
+        """Get path to a locally provisioned silero_vad.onnx model."""
+        configured_path = os.getenv(MODEL_PATH_ENV)
+        model_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else Path(__file__).parent / DEFAULT_MODEL_FILENAME
+        )
 
         if not model_path.exists():
-            import urllib.request
-
-            url = (
-                "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
+            raise FileNotFoundError(
+                "Silero VAD model not found. "
+                f"Set {MODEL_PATH_ENV} to a provisioned .onnx file or bundle "
+                f"{DEFAULT_MODEL_FILENAME} next to {Path(__file__).name}."
             )
-            logger.info(f"Downloading Silero VAD model to {model_path}...")
-            urllib.request.urlretrieve(url, str(model_path))
-            logger.info("Silero VAD model downloaded successfully")
+
+        expected_sha256 = os.getenv(MODEL_SHA256_ENV)
+        if expected_sha256:
+            SileroVAD._verify_model_checksum(model_path, expected_sha256)
 
         return str(model_path)
+
+    @staticmethod
+    def _verify_model_checksum(model_path: Path, expected_sha256: str):
+        """Verify the model checksum when an expected digest is configured."""
+        digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+        if digest.lower() != expected_sha256.lower():
+            raise ValueError(
+                f"Silero VAD model checksum mismatch for {model_path}: "
+                f"expected {expected_sha256}, got {digest}"
+            )
 
     def _compute_volume(self, audio_int16: np.ndarray) -> float:
         """Compute normalized RMS volume [0.0, 1.0] from int16 audio."""
@@ -268,6 +292,8 @@ class SileroVAD:
             VADEvent indicating any state transition.
         """
         loop = asyncio.get_running_loop()
+        if self._closed:
+            raise RuntimeError("SileroVAD has been closed")
         confidence, volume = await loop.run_in_executor(
             self._executor, self._run_inference, audio_bytes
         )
@@ -328,10 +354,16 @@ class SileroVAD:
 
     def reset(self):
         """Reset VAD state (e.g., on new conversation)."""
+        if self._closed:
+            return
         self._state = VADState.QUIET
         self._accumulator_frames = 0
         self._model.reset_state()
 
     def close(self):
         """Shut down the thread pool."""
+        if self._closed:
+            return
+        self._closed = True
         self._executor.shutdown(wait=False)
+        self._executor = None

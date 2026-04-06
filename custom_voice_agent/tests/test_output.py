@@ -154,3 +154,29 @@ class TestLiveKitOutputBargein:
             assert item is None
 
             await output.stop()
+
+    @pytest.mark.asyncio
+    async def test_queue_audio_drops_oldest_chunks_when_full(self, mock_room):
+        """Bounded output queues should drop old audio instead of growing forever."""
+        with patch("custom_voice_agent.transport.livekit_output.rtc") as mock_rtc:
+            mock_source = MockAudioSource(48000, 1)
+            mock_rtc.AudioSource.return_value = mock_source
+            mock_rtc.LocalAudioTrack.create_audio_track.return_value = MagicMock(sid="track1")
+            mock_rtc.TrackPublishOptions.return_value = MagicMock()
+            mock_rtc.TrackSource.SOURCE_MICROPHONE = 0
+
+            output = LiveKitOutput(
+                mock_room,
+                sample_rate=24000,
+                chunk_ms=40,
+                max_queue_chunks=2,
+            )
+            await output.start()
+
+            audio = b"\x00" * int(24000 * 0.2 * 2)  # 200 ms => 5 chunks at 40 ms
+            await output.queue_audio(audio)
+
+            assert output._queue.qsize() == 2
+            assert output.health_snapshot()["dropped_chunks"] == 3
+
+            await output.stop()

@@ -12,7 +12,7 @@
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Callable, Coroutine, Optional
 
 import numpy as np
 
@@ -92,6 +92,8 @@ class LiveKitOutput:
         num_channels: int = 1,
         chunk_ms: int = DEFAULT_CHUNK_MS,
         livekit_sample_rate: int = 48000,
+        max_queue_chunks: int = 200,
+        session_id: str = "unknown",
     ):
         """Initialize LiveKit audio output.
 
@@ -107,13 +109,15 @@ class LiveKitOutput:
         self._num_channels = num_channels
         self._chunk_ms = chunk_ms
         self._livekit_sample_rate = livekit_sample_rate
+        self._max_queue_chunks = max_queue_chunks
+        self._session_id = session_id
 
         # Chunk size in bytes (16-bit PCM)
         samples_per_chunk = int(sample_rate * chunk_ms / 1000)
         self._chunk_bytes = samples_per_chunk * 2 * num_channels  # 2 bytes per sample
 
         # Audio queue and send task
-        self._queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
+        self._queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue(maxsize=max_queue_chunks)
         self._send_task: Optional[asyncio.Task] = None
 
         # LiveKit audio source and track
@@ -123,13 +127,21 @@ class LiveKitOutput:
         # State
         self._bot_speaking = False
         self._running = False
+        self._dropped_chunks = 0
+        self._sent_chunks = 0
+        self._last_error: Optional[str] = None
 
         # Event callbacks (set by agent)
         self.on_bot_started_speaking: Optional[asyncio.Future] = None
         self.on_bot_stopped_speaking: Optional[asyncio.Future] = None
+        self.on_failure: Optional[Callable[[str], Coroutine]] = None
 
         # Callback for state change events
         self._event_callbacks: list = []
+
+    @property
+    def _log_prefix(self) -> str:
+        return f"[session_id={self._session_id}]"
 
     def add_event_callback(self, callback):
         """Register a callback for bot speaking state changes."""
@@ -145,7 +157,11 @@ class LiveKitOutput:
 
     async def start(self):
         """Start the audio output: create LiveKit track and start send loop."""
+        if self._running:
+            return
+
         self._running = True
+        self._last_error = None
 
         # Create LiveKit audio source at the LiveKit-native sample rate
         self._audio_source = rtc.AudioSource(
@@ -170,15 +186,13 @@ class LiveKitOutput:
 
     async def stop(self):
         """Stop the audio output and unpublish the track."""
+        if not self._running and self._send_task is None:
+            return
+
         self._running = False
 
         # Cancel send task
-        if self._send_task and not self._send_task.done():
-            self._send_task.cancel()
-            try:
-                await self._send_task
-            except asyncio.CancelledError:
-                pass
+        await self._cancel_send_task()
 
         # Unpublish track
         if self._local_track:
@@ -186,7 +200,8 @@ class LiveKitOutput:
             self._local_track = None
             self._audio_source = None
 
-        logger.info("LiveKit output stopped")
+        self._drain_queue()
+        logger.info("%s LiveKit output stopped", self._log_prefix)
 
     async def queue_audio(self, audio_bytes: bytes):
         """Queue audio for output, chunked for responsive interruption.
@@ -202,7 +217,7 @@ class LiveKitOutput:
         while offset < len(audio_bytes):
             end = min(offset + self._chunk_bytes, len(audio_bytes))
             chunk = audio_bytes[offset:end]
-            await self._queue.put(chunk)
+            self._enqueue_queue_item(chunk)
             offset = end
 
     async def cancel_and_clear(self):
@@ -217,24 +232,13 @@ class LiveKitOutput:
         Result: Audio stops within ~40ms (one chunk) of this call.
         """
         # Cancel the send task
-        if self._send_task and not self._send_task.done():
-            self._send_task.cancel()
-            try:
-                await self._send_task
-            except asyncio.CancelledError:
-                pass
+        await self._cancel_send_task()
 
         # Drain the queue
-        drained = 0
-        while not self._queue.empty():
-            try:
-                self._queue.get_nowait()
-                drained += 1
-            except asyncio.QueueEmpty:
-                break
+        drained = self._drain_queue()
 
         if drained > 0:
-            logger.debug(f"Barge-in: drained {drained} audio chunks")
+            logger.debug("%s Barge-in: drained %s audio chunks", self._log_prefix, drained)
 
         # Update state
         was_speaking = self._bot_speaking
@@ -290,12 +294,16 @@ class LiveKitOutput:
                     samples_per_channel=len(audio_int16),
                 )
                 await self._audio_source.capture_frame(lk_frame)
+                self._sent_chunks += 1
 
         except asyncio.CancelledError:
             # Barge-in cancellation — this is expected and intentional
             pass
-        except Exception:
-            logger.exception("Error in audio send loop")
+        except Exception as exc:
+            self._last_error = str(exc)
+            logger.exception("%s Error in audio send loop", self._log_prefix)
+            if self._running and self.on_failure:
+                await self.on_failure(f"LiveKit output failed: {exc}")
 
     async def signal_end_of_response(self):
         """Signal that the current bot response audio is complete.
@@ -303,4 +311,58 @@ class LiveKitOutput:
         This sends a poison pill (None) to the queue so the send loop
         knows to emit BotStoppedSpeakingFrame after all audio is played.
         """
-        await self._queue.put(None)
+        self._enqueue_queue_item(None)
+
+    def health_snapshot(self) -> dict:
+        """Return operational details for health/readiness reporting."""
+        return {
+            "running": self._running,
+            "queue_depth": self._queue.qsize(),
+            "queue_capacity": self._max_queue_chunks,
+            "dropped_chunks": self._dropped_chunks,
+            "sent_chunks": self._sent_chunks,
+            "bot_speaking": self._bot_speaking,
+            "last_error": self._last_error,
+        }
+
+    async def _cancel_send_task(self):
+        task = self._send_task
+        if task and not task.done():
+            task.cancel()
+            if task is not asyncio.current_task():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                self._send_task = None
+        elif task is None or task.done():
+            self._send_task = None
+
+    def _drain_queue(self) -> int:
+        drained = 0
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                drained += 1
+            except asyncio.QueueEmpty:
+                break
+        return drained
+
+    def _enqueue_queue_item(self, item: Optional[bytes]):
+        dropped = 0
+        while self._queue.full():
+            try:
+                self._queue.get_nowait()
+                dropped += 1
+            except asyncio.QueueEmpty:
+                break
+
+        if dropped:
+            self._dropped_chunks += dropped
+            logger.warning(
+                "%s Output queue full, dropped %s queued chunk(s)",
+                self._log_prefix,
+                dropped,
+            )
+
+        self._queue.put_nowait(item)
