@@ -34,15 +34,13 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
-# Install system dependencies
+# Install system dependencies (Node.js added via NodeSource below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     supervisor \
-    nodejs \
-    npm \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node 20 from NodeSource for a more recent version
+# Install Node.js 20 from NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
