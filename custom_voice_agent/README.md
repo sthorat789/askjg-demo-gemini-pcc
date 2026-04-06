@@ -55,11 +55,11 @@ User (browser/phone)
 
 ## Components
 
-### 1. Frame System (`frames.py`)
+### 1. Frame System (`src/custom_voice_agent/frames.py`)
 Simple dataclass-based frame types with `PriorityQueue` support.
 `SystemFrame` (interruptions, control) always processes before `DataFrame` (audio).
 
-### 2. Silero VAD (`vad/silero_vad.py`)
+### 2. Silero VAD (`src/custom_voice_agent/vad/silero_vad.py`)
 Direct ONNX Runtime inference with the same 4-state machine as Pipecat:
 - **QUIET → STARTING**: Voice detected (confidence ≥ 0.75, volume ≥ 0.6)
 - **STARTING → SPEAKING**: After 0.2s of continuous speech → emits `SPEECH_STARTED`
@@ -70,24 +70,24 @@ Inference runs in a `ThreadPoolExecutor` (~2-5ms per frame, non-blocking).
 Production deployments must provision the model locally via
 `SILERO_VAD_MODEL_PATH` or by bundling `vad/silero_vad.onnx` in the image.
 
-### 3. LiveKit Input (`transport/livekit_input.py`)
+### 3. LiveKit Input (`src/custom_voice_agent/transport/livekit_input.py`)
 Subscribes to remote audio tracks, resamples 48kHz → 16kHz, feeds VAD + Gemini.
 
-### 4. LiveKit Output (`transport/livekit_output.py`)
+### 4. LiveKit Output (`src/custom_voice_agent/transport/livekit_output.py`)
 **The critical barge-in component:**
 - Chunks audio into ≤40ms pieces before queuing
 - Background task streams chunks to LiveKit
 - `cancel_and_clear()`: Cancels task + drains queue in ~0ms
 - Result: Audio stops within ~40ms of interruption trigger
 
-### 5. Gemini Live Session (`llm/gemini_live.py`)
+### 5. Gemini Live Session (`src/custom_voice_agent/llm/gemini_live.py`)
 Direct `google-genai` usage:
 - `send_realtime_input()` for user audio
 - `receive()` async iterator for bot audio/text
 - `send_activity_start()`/`send_activity_end()` for client-side VAD signals
 - Gemini handles interruption implicitly (new audio stops generation)
 
-### 6. Voice Agent (`agent.py`)
+### 6. Voice Agent (`src/custom_voice_agent/agent.py`)
 Central orchestrator replacing Pipecat's Pipeline + PipelineTask:
 - Coordinates all components
 - Manages user/bot speaking state
@@ -108,8 +108,11 @@ numpy>=1.24.0              # Audio processing
 ## Quick Start
 
 ```bash
-# Install dependencies
-pip install -r custom_voice_agent/requirements.txt
+# Enter the project directory
+cd custom_voice_agent
+
+# Install the package in editable mode
+pip install -e .
 
 # Set environment variables
 export LIVEKIT_URL=wss://your-server.livekit.cloud
@@ -162,6 +165,18 @@ Both endpoints are served by the Python backend on `PORT` (default `8080`).
 The `frontend/` directory remains an optional demo UI and is not packaged into the
 production container. Production readiness for this service is defined around the
 backend voice agent plus the health/readiness endpoint above.
+
+## Project Layout
+
+```text
+custom_voice_agent/
+├── src/custom_voice_agent/    # Python package source
+├── tests/                     # Backend tests
+├── frontend/                  # Optional demo UI
+├── Dockerfile                 # Container build
+├── pyproject.toml             # Package metadata
+└── supervisord.conf           # Container runtime process config
+```
 
 ## Barge-In Flow (The Critical Path)
 

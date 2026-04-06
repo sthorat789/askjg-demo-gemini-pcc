@@ -29,18 +29,17 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["."]
-artifacts = ["vad/*.onnx"]
+packages = ["src/custom_voice_agent"]
+artifacts = ["src/custom_voice_agent/vad/*.onnx"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "*.py",
-    "llm/**/*.py",
-    "transport/**/*.py",
-    "vad/**/*.py",
-    "vad/*.onnx",
+    "src/custom_voice_agent/**/*.py",
+    "src/custom_voice_agent/vad/*.onnx",
+    "tests/**/*.py",
     "README.md",
     "requirements.txt",
 ]

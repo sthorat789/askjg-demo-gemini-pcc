@@ -247,10 +247,12 @@ class LiveKitAgent:
         if not lk_api_key or not lk_api_secret:
             raise ValueError("LIVEKIT_API_KEY and LIVEKIT_API_SECRET are required")
 
-        token = api.AccessToken(lk_api_key, lk_api_secret) \
-            .with_identity("voice-agent") \
-            .with_name("Gemini Live Agent") \
+        token = (
+            api.AccessToken(lk_api_key, lk_api_secret)
+            .with_identity("voice-agent")
+            .with_name("Gemini Live Agent")
             .with_grants(api.VideoGrants(room_join=True, room=self.room_name))
+        )
         return token.to_jwt()
 
     async def broadcast_ui_state(self, payload: dict):
