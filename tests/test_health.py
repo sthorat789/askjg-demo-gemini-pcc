@@ -9,7 +9,7 @@ from bot.core.health import HealthServer, HealthState
 
 
 @pytest.mark.asyncio
-async def test_readyz_tracks_runtime_state(port: int):
+async def test_readiness_endpoint_tracks_runtime_state(port: int):
     state = HealthState()
     server = HealthServer(port, state.payload)
     await server.start()
@@ -41,5 +41,5 @@ def test_deploy_config_uses_real_defaults():
     config = tomllib.loads(config_path.read_text())
 
     assert config["image"] == "ghcr.io/sthorat789/askjg-demo-gemini-pcc:latest"
-    assert config["secret_set"] == "askjg-demo-gemini-pcc-secrets"
+    assert config["secret_set"] == "askjg-demo-gemini-pcc-credentials"
     assert config["ports"]["health"] == 8080

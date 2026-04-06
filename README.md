@@ -262,7 +262,7 @@ Pipecat Cloud uses secret sets to securely store credentials. The `$(cat ...)` s
 
 **Basic deployment (Gemini Live only):**
 ```bash
-pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1"
@@ -270,7 +270,7 @@ pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
 
 **With call recording:**
 ```bash
-pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1" \
@@ -280,7 +280,7 @@ pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
 
 **With webhook reporting:**
 ```bash
-pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   GOOGLE_VERTEX_CREDENTIALS="$(cat /path/to/google-credentials.json)" \
   GOOGLE_CLOUD_PROJECT_ID="your-project-id" \
   GOOGLE_CLOUD_LOCATION="us-central1" \
@@ -292,7 +292,7 @@ pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
 
 Verify your secrets were set:
 ```bash
-pipecat cloud secrets list askjg-demo-gemini-pcc-secrets
+pipecat cloud secrets list askjg-demo-gemini-pcc-credentials
 ```
 
 ### Step 3: Deploy
@@ -317,7 +317,7 @@ To add or update individual secrets without re-setting everything:
 
 ```bash
 # Add or update webhook configuration
-pipecat cloud secrets set askjg-demo-gemini-pcc-secrets \
+pipecat cloud secrets set askjg-demo-gemini-pcc-credentials \
   WEBHOOK_URL="https://your-webhook-endpoint.com/api/call-reports" \
   WEBHOOK_API_KEY="your-api-key"
 ```
