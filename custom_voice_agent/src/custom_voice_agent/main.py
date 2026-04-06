@@ -216,15 +216,10 @@ def _load_system_prompt() -> str:
     """Load system prompt from the prompts directory."""
     from pathlib import Path
 
-    # Try the bot/prompts directory (shared with Pipecat bot)
-    prompt_path = Path(__file__).parent.parent / "bot" / "prompts" / "demo_system_prompt.md"
-    if prompt_path.exists():
-        return prompt_path.read_text()
-
-    # Fallback: check current directory
-    prompt_path = Path("bot/prompts/demo_system_prompt.md")
-    if prompt_path.exists():
-        return prompt_path.read_text()
+    for candidate_root in [*Path(__file__).resolve().parents, Path.cwd()]:
+        prompt_path = candidate_root / "bot" / "prompts" / "demo_system_prompt.md"
+        if prompt_path.exists():
+            return prompt_path.read_text()
 
     logger.warning("System prompt not found, using default")
     return (

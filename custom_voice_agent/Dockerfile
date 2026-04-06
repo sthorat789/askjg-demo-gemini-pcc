@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir uv
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/custom_voice_agent/src:/app
 ENV PORT=8080
 
 COPY pyproject.toml uv.lock requirements.txt README.md ./
