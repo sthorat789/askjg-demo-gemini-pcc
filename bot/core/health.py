@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, Union
 
 from loguru import logger
 
@@ -37,7 +37,7 @@ class HealthState:
         self._client_connected = False
         self._last_reason = reason or self._last_reason
 
-    def mark_error(self, error: Exception | str):
+    def mark_error(self, error: Union[Exception, str]):
         self._last_error = str(error)
 
     def mark_not_ready(self):
@@ -122,7 +122,6 @@ class HealthServer:
             await writer.wait_closed()
 
 
-_HEALTH_PORT = int(os.getenv("PORT", "8080"))
 _HEALTH_SERVER: Optional[HealthServer] = None
 _HEALTH_LOCK = asyncio.Lock()
 HEALTH_STATE = HealthState()
@@ -133,5 +132,6 @@ async def ensure_health_server():
 
     async with _HEALTH_LOCK:
         if _HEALTH_SERVER is None:
-            _HEALTH_SERVER = HealthServer(_HEALTH_PORT, HEALTH_STATE.payload)
+            port = int(os.getenv("PORT", "8080"))
+            _HEALTH_SERVER = HealthServer(port, HEALTH_STATE.payload)
             await _HEALTH_SERVER.start()

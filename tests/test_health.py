@@ -9,20 +9,20 @@ from bot.core.health import HealthServer, HealthState
 
 
 @pytest.mark.asyncio
-async def test_readyz_tracks_runtime_state(unused_tcp_port: int):
+async def test_readyz_tracks_runtime_state(port: int):
     state = HealthState()
-    server = HealthServer(unused_tcp_port, state.payload)
+    server = HealthServer(port, state.payload)
     await server.start()
 
     try:
-        reader, writer = await asyncio.open_connection("127.0.0.1", unused_tcp_port)
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.write(b"GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n")
         await writer.drain()
         raw = await reader.read()
         assert b"503 Service Unavailable" in raw
 
         state.mark_session_started("daily", 16000)
-        reader, writer = await asyncio.open_connection("127.0.0.1", unused_tcp_port)
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
         writer.write(b"GET /readyz HTTP/1.1\r\nHost: localhost\r\n\r\n")
         await writer.drain()
         raw = await reader.read()
