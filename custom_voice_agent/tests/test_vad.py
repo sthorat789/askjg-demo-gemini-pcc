@@ -5,9 +5,13 @@
 # using direct _update_state() calls to simulate VAD decisions.
 #
 
+import hashlib
+
 import pytest
 
 from custom_voice_agent.vad.silero_vad import (
+    MODEL_PATH_ENV,
+    MODEL_SHA256_ENV,
     SileroVAD,
     VADEvent,
     VADParams,
@@ -184,3 +188,31 @@ class TestVADParams:
         assert params.start_secs == 0.2
         assert params.stop_secs == 0.2
         assert params.min_volume == 0.6
+
+
+class TestVADModelResolution:
+    def test_default_model_path_requires_local_file(self, monkeypatch):
+        monkeypatch.delenv(MODEL_PATH_ENV, raising=False)
+        monkeypatch.delenv(MODEL_SHA256_ENV, raising=False)
+
+        with pytest.raises(FileNotFoundError):
+            SileroVAD._get_default_model_path()
+
+    def test_model_checksum_validation(self, tmp_path, monkeypatch):
+        model_path = tmp_path / "silero_vad.onnx"
+        model_path.write_bytes(b"fake-model")
+        monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+        monkeypatch.setenv(
+            MODEL_SHA256_ENV, hashlib.sha256(b"fake-model").hexdigest()
+        )
+
+        assert SileroVAD._get_default_model_path() == str(model_path)
+
+    def test_model_checksum_mismatch_raises(self, tmp_path, monkeypatch):
+        model_path = tmp_path / "silero_vad.onnx"
+        model_path.write_bytes(b"fake-model")
+        monkeypatch.setenv(MODEL_PATH_ENV, str(model_path))
+        monkeypatch.setenv(MODEL_SHA256_ENV, "deadbeef")
+
+        with pytest.raises(ValueError):
+            SileroVAD._get_default_model_path()

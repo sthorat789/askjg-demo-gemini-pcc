@@ -12,8 +12,10 @@
 #
 
 import asyncio
+import hashlib
 import logging
 import math
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -23,6 +25,10 @@ from typing import Optional
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL_FILENAME = "silero_vad.onnx"
+MODEL_PATH_ENV = "SILERO_VAD_MODEL_PATH"
+MODEL_SHA256_ENV = "SILERO_VAD_MODEL_SHA256"
 
 # ---------------------------------------------------------------------------
 # VAD state machine
@@ -212,24 +218,36 @@ class SileroVAD:
 
     @staticmethod
     def _get_default_model_path() -> str:
-        """Get path to bundled silero_vad.onnx model.
-
-        Downloads the model from the Silero GitHub repo if not present.
-        """
-        model_dir = Path(__file__).parent
-        model_path = model_dir / "silero_vad.onnx"
+        """Get path to a locally provisioned silero_vad.onnx model."""
+        configured_path = os.getenv(MODEL_PATH_ENV)
+        model_path = (
+            Path(configured_path).expanduser()
+            if configured_path
+            else Path(__file__).parent / DEFAULT_MODEL_FILENAME
+        )
 
         if not model_path.exists():
-            import urllib.request
-
-            url = (
-                "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
+            raise FileNotFoundError(
+                "Silero VAD model not found. "
+                f"Set {MODEL_PATH_ENV} to a provisioned .onnx file or bundle "
+                f"{DEFAULT_MODEL_FILENAME} next to {Path(__file__).name}."
             )
-            logger.info(f"Downloading Silero VAD model to {model_path}...")
-            urllib.request.urlretrieve(url, str(model_path))
-            logger.info("Silero VAD model downloaded successfully")
+
+        expected_sha256 = os.getenv(MODEL_SHA256_ENV)
+        if expected_sha256:
+            SileroVAD._verify_model_checksum(model_path, expected_sha256)
 
         return str(model_path)
+
+    @staticmethod
+    def _verify_model_checksum(model_path: Path, expected_sha256: str):
+        """Verify the model checksum when an expected digest is configured."""
+        digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
+        if digest.lower() != expected_sha256.lower():
+            raise ValueError(
+                f"Silero VAD model checksum mismatch for {model_path}: "
+                f"expected {expected_sha256}, got {digest}"
+            )
 
     def _compute_volume(self, audio_int16: np.ndarray) -> float:
         """Compute normalized RMS volume [0.0, 1.0] from int16 audio."""

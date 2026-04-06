@@ -67,6 +67,8 @@ Direct ONNX Runtime inference with the same 4-state machine as Pipecat:
 - **STOPPING → QUIET**: After 0.2s of silence → emits `SPEECH_STOPPED`
 
 Inference runs in a `ThreadPoolExecutor` (~2-5ms per frame, non-blocking).
+Production deployments must provision the model locally via
+`SILERO_VAD_MODEL_PATH` or by bundling `vad/silero_vad.onnx` in the image.
 
 ### 3. LiveKit Input (`transport/livekit_input.py`)
 Subscribes to remote audio tracks, resamples 48kHz → 16kHz, feeds VAD + Gemini.
@@ -118,6 +120,9 @@ export GOOGLE_API_KEY=your-gemini-key      # For preview model
 # export GOOGLE_VERTEX_CREDENTIALS='{"type": "service_account", ...}'
 # export GOOGLE_CLOUD_PROJECT_ID=your-project
 
+# Provision the Silero model locally (runtime downloads are disabled)
+export SILERO_VAD_MODEL_PATH=/opt/models/silero_vad.onnx
+
 # Run
 python -m custom_voice_agent.main
 ```
@@ -137,10 +142,26 @@ python -m custom_voice_agent.main
 | `BOT_NAME` | `Maya` | Bot's display name |
 | `MAX_CALL_DURATION_SECS` | `840` | Maximum call duration |
 | `USER_IDLE_TIMEOUT_SECS` | `120` | User idle timeout |
+| `PORT` | `8080` | Health/readiness HTTP port |
+| `SILERO_VAD_MODEL_PATH` | bundled path | Absolute path to the provisioned Silero ONNX model |
+| `SILERO_VAD_MODEL_SHA256` | — | Optional checksum for the provisioned VAD model |
 | `VAD_CONFIDENCE` | `0.75` | VAD confidence threshold |
 | `VAD_START_SECS` | `0.2` | Speech start confirmation delay |
 | `VAD_STOP_SECS` | `0.2` | Speech stop confirmation delay |
 | `VAD_MIN_VOLUME` | `0.6` | Minimum volume threshold |
+
+## Health Endpoints
+
+- `GET /healthz` — liveness and diagnostic payload
+- `GET /readyz` — returns `200` only after LiveKit is connected and the agent is running
+
+Both endpoints are served by the Python backend on `PORT` (default `8080`).
+
+## Frontend Scope
+
+The `frontend/` directory remains an optional demo UI and is not packaged into the
+production container. Production readiness for this service is defined around the
+backend voice agent plus the health/readiness endpoint above.
 
 ## Barge-In Flow (The Critical Path)
 
