@@ -232,7 +232,7 @@ async def run_bot(
             reason = frame.reason or EndedReason.CUSTOMER_ENDED_CALL
 
         logger.info(f"Pipeline finished with reason: {reason}")
-        HEALTH_STATE.mark_session_finished(reason)
+        HEALTH_STATE.mark_session_finished(str(reason))
         reporter.set_ended_reason(reason)
 
         # Ensure ended_at is set (may not be if pipeline ended before disconnect)

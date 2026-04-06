@@ -32,12 +32,12 @@ class HealthState:
     def mark_client_disconnected(self):
         self._client_connected = False
 
-    def mark_session_finished(self, reason: Optional[object] = None):
+    def mark_session_finished(self, reason: Optional[str] = None):
         self._active_session = False
         self._client_connected = False
-        self._last_reason = str(reason) if reason else self._last_reason
+        self._last_reason = reason or self._last_reason
 
-    def mark_error(self, error: object):
+    def mark_error(self, error: Exception | str):
         self._last_error = str(error)
 
     def mark_not_ready(self):
